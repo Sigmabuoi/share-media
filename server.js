@@ -1,4 +1,4 @@
-// server.js bảo mật hơn + hỗ trợ .webp
+// server.js bảo mật hơn + hỗ trợ .webp + fix lỗi JSON
 
 const express = require('express');
 const multer = require('multer');
@@ -14,29 +14,29 @@ const PORT = process.env.PORT || 3000;
 // ====== Bảo mật HTTP Headers ======
 app.use(helmet());
 
-// ====== Rate Limit: giới hạn request để chống spam/DDoS nhẹ ======
+// ====== Rate Limit ======
 const limiter = rateLimit({
-    windowMs: 60 * 1000, // 1 phút
-    max: 100, // tối đa 100 request/IP/phút
-    message: 'Quá nhiều yêu cầu từ IP này, vui lòng thử lại sau.'
+    windowMs: 60 * 1000,
+    max: 100,
+    message: { error: 'Quá nhiều yêu cầu từ IP này, vui lòng thử lại sau.' }
 });
 app.use(limiter);
 
-// ====== Cấu hình MongoDB ======
+// ====== MongoDB ======
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
 }).then(() => console.log('Đã kết nối MongoDB'))
   .catch(err => console.error('Lỗi kết nối MongoDB:', err));
 
-// ====== Cấu hình Cloudinary ======
+// ====== Cloudinary ======
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// ====== Schema MongoDB ======
+// ====== Schema ======
 const mediaSchema = new mongoose.Schema({
     url: String,
     type: String,
@@ -44,11 +44,11 @@ const mediaSchema = new mongoose.Schema({
 });
 const Media = mongoose.model('Media', mediaSchema);
 
-// ====== Middleware upload file với kiểm tra mimetype ======
+// ====== Multer config ======
 const storage = multer.memoryStorage();
 const upload = multer({
     storage,
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+    limits: { fileSize: 100 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const allowed = [
             'image/jpeg', 'image/png', 'image/gif', 'image/webp',
@@ -62,57 +62,64 @@ const upload = multer({
     }
 });
 
-// ====== API upload ======
+// ====== Upload API ======
 app.post('/upload', upload.single('media'), async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ error: 'Không có file được chọn' });
+        if (!req.file) {
+            return res.status(400).json({ error: 'Không có file được chọn' });
+        }
 
-        // Xác định loại file (image hoặc video)
         const type = req.file.mimetype.startsWith('image') ? 'image' : 'video';
 
-        // Upload lên Cloudinary
-        const uploadStream = cloudinary.uploader.upload_stream(
-            { resource_type: type },
-            async (error, cloudResult) => {
-                if (error) return res.status(500).json({ error: 'Upload Cloudinary thất bại' });
+        // Dùng Promise để chờ upload_stream hoàn thành
+        const uploadToCloudinary = () => {
+            return new Promise((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    { resource_type: type },
+                    (error, result) => {
+                        if (error) reject(error);
+                        else resolve(result);
+                    }
+                );
+                stream.end(req.file.buffer);
+            });
+        };
 
-                // Lưu vào MongoDB
-                const newMedia = new Media({ url: cloudResult.secure_url, type });
-                await newMedia.save();
+        const cloudResult = await uploadToCloudinary();
 
-                res.json({ message: 'Tải lên thành công', url: cloudResult.secure_url });
-            }
-        );
-        uploadStream.end(req.file.buffer);
+        // Lưu MongoDB
+        const newMedia = new Media({ url: cloudResult.secure_url, type });
+        await newMedia.save();
+
+        res.json({ message: 'Tải lên thành công', url: cloudResult.secure_url });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Lỗi server khi tải file' });
+        console.error('Upload error:', err);
+        res.status(500).json({ error: 'Lỗi khi tải file lên' });
     }
 });
 
-// ====== API lấy danh sách upload ======
+// ====== List API ======
 app.get('/uploads-list', async (req, res) => {
     try {
         const mediaList = await Media.find({}).sort({ createdAt: -1 });
         res.json(mediaList);
     } catch (err) {
-        console.error(err);
+        console.error('List error:', err);
         res.status(500).json({ error: 'Lỗi khi tải danh sách' });
     }
 });
 
-// ====== Xử lý lỗi toàn cục ======
+// ====== Xử lý lỗi ======
 app.use((err, req, res, next) => {
-    console.error('Lỗi chưa bắt:', err.message);
+    console.error('Global error:', err.message);
     res.status(500).json({ error: 'Đã xảy ra lỗi không mong muốn' });
 });
 
-// ====== Khởi động server ======
 app.use(express.static('public'));
-app.listen(PORT, () => console.log(`Server đang chạy tại cổng ${PORT}`));
 
-// ====== Bắt lỗi toàn cục ======
+app.listen(PORT, () => console.log(`Server chạy tại cổng ${PORT}`));
+
 process.on('uncaughtException', err => {
     console.error('Uncaught Exception:', err);
 });
