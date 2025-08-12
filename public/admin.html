@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin Login</title>
+  <style>
+    body {font-family: Arial, sans-serif; padding:20px; background:#f4f4f4}
+    .box {max-width:420px;margin:40px auto;padding:20px;background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}
+    input {width:100%;padding:8px;margin:8px 0}
+    button {padding:10px 14px}
+    .msg {margin-top:10px}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>Admin login</h2>
+    <input id="u" placeholder="Username" />
+    <input id="p" placeholder="Password" type="password" />
+    <button id="login">Đăng nhập</button>
+    <button id="logout" style="display:none">Đăng xuất</button>
+    <div class="msg" id="msg"></div>
+    <p>Sau khi đăng nhập, quay lại trang chính để xóa media.</p>
+  </div>
+
+  <script>
+    const msg = document.getElementById('msg');
+    document.getElementById('login').addEventListener('click', async () => {
+      const username = document.getElementById('u').value;
+      const password = document.getElementById('p').value;
+      const res = await fetch('/admin-login', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ username, password }),
+        credentials: 'include'
+      });
+      const data = await res.json();
+      if (res.ok) { msg.textContent = 'Đăng nhập thành công'; document.getElementById('logout').style.display='inline'; }
+      else { msg.textContent = data.error || 'Lỗi'; }
+    });
+
+    document.getElementById('logout').addEventListener('click', async () => {
+      await fetch('/admin-logout', { method: 'POST', credentials: 'include' });
+      msg.textContent = 'Đã đăng xuất'; document.getElementById('logout').style.display='none';
+    });
+
+    // show admin status on load
+    (async () => {
+      const s = await fetch('/admin-status', {credentials:'include'});
+      const j = await s.json();
+      if (j.admin) document.getElementById('logout').style.display='inline';
+    })();
+  </script>
+</body>
+</html>
