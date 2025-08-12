@@ -1,11 +1,10 @@
-// server.js bảo mật hơn + hỗ trợ .webp + fix lỗi JSON
-
 const express = require('express');
 const multer = require('multer');
 const mongoose = require('mongoose');
 const cloudinary = require('cloudinary').v2;
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const basicAuth = require('express-basic-auth');
 require('dotenv').config();
 
 const app = express();
@@ -14,13 +13,33 @@ const PORT = process.env.PORT || 3000;
 // ====== Bảo mật HTTP Headers ======
 app.use(helmet());
 
-// ====== Rate Limit ======
-const limiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 100,
-    message: { error: 'Quá nhiều yêu cầu từ IP này, vui lòng thử lại sau.' }
+// ====== Basic Authentication ======
+app.use(basicAuth({
+    users: { 'admin': process.env.APP_PASSWORD }, // Username: admin, Password: từ biến môi trường
+    challenge: true, // Hiển thị hộp thoại login
+    unauthorizedResponse: { error: 'Cần tên đăng nhập và mật khẩu!' }
+}));
+
+// ====== Rate Limit Toàn App (20 request/phút/IP) ======
+const generalLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 phút
+    max: 20, // 20 request mỗi IP mỗi phút
+    message: { error: 'Quá nhiều yêu cầu! Vui lòng thử lại sau 1 phút.' },
+    standardHeaders: true,
+    legacyHeaders: false
 });
-app.use(limiter);
+
+// Rate Limit riêng cho Upload (10 request/phút/IP)
+const uploadLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 phút
+    max: 10, // 10 upload mỗi IP mỗi phút
+    message: { error: 'Quá nhiều yêu cầu tải lên! Vui lòng thử lại sau 1 phút.' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+// Áp dụng rate limit toàn app
+app.use(generalLimiter);
 
 // ====== MongoDB ======
 mongoose.connect(process.env.MONGODB_URI, {
@@ -48,7 +67,7 @@ const Media = mongoose.model('Media', mediaSchema);
 const storage = multer.memoryStorage();
 const upload = multer({
     storage,
-    limits: { fileSize: 100 * 1024 * 1024 },
+    limits: { fileSize: 20 * 1024 * 1024 }, // Giảm xuống 20MB
     fileFilter: (req, file, cb) => {
         const allowed = [
             'image/jpeg', 'image/png', 'image/gif', 'image/webp',
@@ -57,13 +76,13 @@ const upload = multer({
         if (allowed.includes(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error('Định dạng file không được phép.'));
+            cb(new Error('Định dạng file không được phép. Chỉ hỗ trợ jpg, png, gif, webp, mp4, webm, ogg.'));
         }
     }
 });
 
 // ====== Upload API ======
-app.post('/upload', upload.single('media'), async (req, res) => {
+app.post('/upload', uploadLimiter, upload.single('media'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'Không có file được chọn' });
@@ -75,7 +94,10 @@ app.post('/upload', upload.single('media'), async (req, res) => {
         const uploadToCloudinary = () => {
             return new Promise((resolve, reject) => {
                 const stream = cloudinary.uploader.upload_stream(
-                    { resource_type: type },
+                    { 
+                        resource_type: type,
+                        upload_preset: process.env.CLOUDINARY_UPLOAD_PRESET
+                    },
                     (error, result) => {
                         if (error) reject(error);
                         else resolve(result);
@@ -94,35 +116,37 @@ app.post('/upload', upload.single('media'), async (req, res) => {
         res.json({ message: 'Tải lên thành công', url: cloudResult.secure_url });
 
     } catch (err) {
-        console.error('Upload error:', err);
-        res.status(500).json({ error: 'Lỗi khi tải file lên' });
+        console.error(`Upload error from IP ${req.ip}:`, err);
+        res.status(500).json({ error: 'Lỗi khi tải file lên: ' + err.message });
     }
 });
 
 // ====== List API ======
 app.get('/uploads-list', async (req, res) => {
     try {
-        const mediaList = await Media.find({}).sort({ createdAt: -1 });
+        const mediaList = await Media.find({}).sort({ createdAt: -1 }).limit(100); // Giới hạn 100 file để tránh quá tải
         res.json(mediaList);
     } catch (err) {
-        console.error('List error:', err);
+        console.error(`List error from IP ${req.ip}:`, err);
         res.status(500).json({ error: 'Lỗi khi tải danh sách' });
     }
 });
 
+// ====== Phục vụ file tĩnh ======
+app.use(express.static('public'));
+
 // ====== Xử lý lỗi ======
 app.use((err, req, res, next) => {
-    console.error('Global error:', err.message);
+    console.error(`Global error from IP ${req.ip}:`, err.message);
     res.status(500).json({ error: 'Đã xảy ra lỗi không mong muốn' });
 });
 
-app.use(express.static('public'));
-
-app.listen(PORT, () => console.log(`Server chạy tại cổng ${PORT}`));
-
+// ====== Xử lý lỗi crash ======
 process.on('uncaughtException', err => {
     console.error('Uncaught Exception:', err);
 });
 process.on('unhandledRejection', err => {
     console.error('Unhandled Rejection:', err);
 });
+
+app.listen(PORT, () => console.log(`Server chạy tại cổng ${PORT}`));
