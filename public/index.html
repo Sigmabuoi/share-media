@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📸 Chia sẻ Ảnh & Video</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <h1>📸 Chia sẻ Ảnh & Video</h1>
+        <p>Tải lên và chia sẻ khoảnh khắc của bạn!</p>
+    </header>
+
+    <main>
+        <form id="uploadForm">
+            <input type="file" id="media" accept="image/*,video/*">
+            <button type="submit" id="uploadBtn">📤 Tải lên</button>
+        </form>
+        <div id="statusMessage"></div>
+
+        <section>
+            <h2>📷 Ảnh</h2>
+            <div id="imageContainer" class="gallery"></div>
+        </section>
+
+        <section>
+            <h2>🎥 Video</h2>
+            <div id="videoContainer" class="gallery"></div>
+        </section>
+    </main>
+
+    <footer>
+        Made with ❤️ by Duc
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
